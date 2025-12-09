@@ -4,6 +4,7 @@ import { Settings } from 'lucide-react';
 import { Button } from '../components/Button';
 import { useCamera } from '../hooks/useCamera';
 import { Preloader } from '../components/Preloader';
+import logoKotak from '../assets/logo-fotoku-kotak.png';
 
 interface HomeProps {
     onStart: (sessionData: any, settings?: any) => void;
@@ -41,7 +42,7 @@ export const Home = ({ onStart, onSettings }: HomeProps) => {
 
             // Fetch System Settings (Fallback)
             try {
-                const settingsResp = await fetch('http://localhost:8000/api/v1/desktop/settings');
+                const settingsResp = await fetch('https://fotoqu.acaraqu.com/api/v1/desktop/settings');
                 if (settingsResp.ok) {
                     const settingsData = await settingsResp.json();
                     if (settingsData.success && settingsData.settings) {
@@ -81,7 +82,7 @@ export const Home = ({ onStart, onSettings }: HomeProps) => {
             // 2. Define polling function
             const checkSession = async () => {
                 try {
-                    const response = await fetch(`http://localhost:8000/api/v1/desktop/check-session`, {
+                    const response = await fetch(`https://fotoqu.acaraqu.com/api/v1/desktop/check-session`, {
                         headers: {
                             'Authorization': `Bearer ${token}`,
                             'Accept': 'application/json',
@@ -149,7 +150,7 @@ export const Home = ({ onStart, onSettings }: HomeProps) => {
         try {
             setStatusMessage('Memulai sesi...');
 
-            const response = await fetch('http://localhost:8000/api/v1/desktop/start-session', {
+            const response = await fetch('https://fotoqu.acaraqu.com/api/v1/desktop/start-session', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -177,7 +178,7 @@ export const Home = ({ onStart, onSettings }: HomeProps) => {
     const getLogoUrl = (path: string) => {
         if (!path) return '';
         if (path.startsWith('http')) return path;
-        return `http://localhost:8000/storage/${path}`;
+        return `https://fotoqu.acaraqu.com/storage/${path}`;
     };
 
     const { videoRef, stream } = useCamera();
@@ -235,7 +236,7 @@ export const Home = ({ onStart, onSettings }: HomeProps) => {
                                 </div>
 
                                 <div className="inline-block bg-white/10 px-4 py-2 rounded-lg border border-white/10">
-                                    <p className="text-sm font-mono text-blue-200">
+                                    <p className="text-sm font-mono text-brand-picton">
                                         {sessionReady.is_event_mode ? (
                                             <span className="text-white font-bold tracking-wider">EVENT MODE: {sessionReady.event_name}</span>
                                         ) : (
@@ -245,18 +246,18 @@ export const Home = ({ onStart, onSettings }: HomeProps) => {
                                 </div>
 
                                 <div className="space-y-2 text-blue-50">
-                                    <p className="font-bold text-lg text-blue-200">Tips Foto Seru:</p>
+                                    <p className="font-bold text-lg text-brand-picton">Tips Foto Seru:</p>
                                     <ul className="space-y-1 text-base">
                                         <li className="flex items-center gap-2">
-                                            <span className="w-1.5 h-1.5 bg-blue-400 rounded-full" />
+                                            <span className="w-1.5 h-1.5 bg-brand-orange rounded-full" />
                                             <span>Kita akan ambil <b>{sessionSettings?.total_photos || 3} foto kece</b> berturut-turut.</span>
                                         </li>
                                         <li className="flex items-center gap-2">
-                                            <span className="w-1.5 h-1.5 bg-blue-400 rounded-full" />
+                                            <span className="w-1.5 h-1.5 bg-brand-orange rounded-full" />
                                             <span>Tenang, ada waktu <b>{sessionSettings?.countdown_seconds || 3} detik</b> buat ganti gaya.</span>
                                         </li>
                                         <li className="flex items-center gap-2">
-                                            <span className="w-1.5 h-1.5 bg-blue-400 rounded-full" />
+                                            <span className="w-1.5 h-1.5 bg-brand-orange rounded-full" />
                                             <span>Jadi diri sendiri dan tunjukkan senyum terbaikmu! 📸</span>
                                         </li>
                                     </ul>
@@ -267,7 +268,7 @@ export const Home = ({ onStart, onSettings }: HomeProps) => {
                                 <Button
                                     size="xl"
                                     onClick={handleStartSession}
-                                    className="w-full md:w-64 h-16 text-xl bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-600/40 border-0"
+                                    className="w-full md:w-64 h-16 text-xl bg-brand-curious hover:bg-brand-picton text-white shadow-lg shadow-brand-curious/40 border-0"
                                 >
                                     Siap? Yuk Mulai! 🚀
                                 </Button>
@@ -286,8 +287,8 @@ export const Home = ({ onStart, onSettings }: HomeProps) => {
         <div className="flex-1 flex flex-col items-center justify-center relative overflow-hidden bg-slate-50">
             {/* Background Animation */}
             <div className="absolute inset-0 z-0 overflow-hidden">
-                <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-blue-200/30 rounded-full blur-[100px] animate-pulse" />
-                <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-purple-200/30 rounded-full blur-[100px] animate-pulse delay-1000" />
+                <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-brand-curious/30 rounded-full blur-[100px] animate-pulse" />
+                <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-brand-orange/30 rounded-full blur-[100px] animate-pulse delay-1000" />
             </div>
 
             {/* Settings Button */}
@@ -319,7 +320,7 @@ export const Home = ({ onStart, onSettings }: HomeProps) => {
                 transition={{ duration: 0.5 }}
                 className="space-y-6"
             >
-                <div className="w-40 h-40 bg-white rounded-[2.5rem] flex items-center justify-center mx-auto shadow-2xl shadow-blue-600/30 rotate-3 transform transition-transform hover:rotate-6 overflow-hidden border-4 border-blue-500">
+                <div className="w-40 h-40 bg-white rounded-[2.5rem] flex items-center justify-center mx-auto shadow-2xl shadow-brand-curious/30 rotate-3 transform transition-transform hover:rotate-6 overflow-hidden border-4 border-brand-curious">
                     {branding?.logo ? (
                         <img
                             src={getLogoUrl(branding.logo)}
@@ -328,7 +329,7 @@ export const Home = ({ onStart, onSettings }: HomeProps) => {
                         />
                     ) : (
                         <img
-                            src="http://localhost:8000/logo-fotoku-kotak.png"
+                            src={logoKotak}
                             alt="Logo"
                             className="w-full h-full object-cover"
                         />
@@ -374,7 +375,7 @@ export const Home = ({ onStart, onSettings }: HomeProps) => {
             {/* Version Footer */}
             <div className="absolute bottom-6 text-center w-full z-10">
                 <p className="text-[10px] text-slate-400/60 font-medium tracking-wide">
-                    Version 1.0.0 dibuat oleh Adam - AcaraQu, Build With Love ❤️
+                    Version 1.0.1 dibuat oleh Adam - AcaraQu, Build With Love ❤️
                 </p>
             </div>
         </div>

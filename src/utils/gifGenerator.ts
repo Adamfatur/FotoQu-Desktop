@@ -7,7 +7,7 @@ export const generateGif = async (images: string[], width: number = 600, height:
             quality: 10,
             width: width,
             height: height,
-            workerScript: '/gif.worker.js'
+            workerScript: './gif.worker.js'
         });
 
         const loadImage = (src: string): Promise<HTMLImageElement> => {

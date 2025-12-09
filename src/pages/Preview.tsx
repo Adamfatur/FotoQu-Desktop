@@ -93,7 +93,7 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
     useEffect(() => {
         const fetchTemplates = async () => {
             try {
-                const response = await fetch('http://127.0.0.1:8000/api/v1/desktop/frames');
+                const response = await fetch('https://fotoqu.acaraqu.com/api/v1/desktop/frames');
                 if (response.ok) {
                     const data = await response.json();
                     if (data.success && data.templates.length > 0) {
@@ -153,7 +153,7 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
                     formData.append('photo', file);
                     formData.append('sequence', (i + 1).toString());
 
-                    await fetch('http://127.0.0.1:8000/api/v1/desktop/upload-photo', {
+                    await fetch('https://fotoqu.acaraqu.com/api/v1/desktop/upload-photo', {
                         method: 'POST',
                         body: formData
                     });
@@ -305,7 +305,7 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
                         formData.append('sequence', (i + 1).toString());
 
                         // Remove timeout for background uploads - let them run until completion
-                        return fetch('http://127.0.0.1:8000/api/v1/desktop/upload-photo', {
+                        return fetch('https://fotoqu.acaraqu.com/api/v1/desktop/upload-photo', {
                             method: 'POST',
                             body: formData
                         });
@@ -317,17 +317,17 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
                     frameFormData.append('session_code', session.session_code);
                     frameFormData.append('frame', frameFile);
 
-                    const frameUploadPromise = fetch('http://127.0.0.1:8000/api/v1/desktop/upload-frame', {
+                    const frameUploadPromise = fetch('https://fotoqu.acaraqu.com/api/v1/desktop/upload-frame', {
                         method: 'POST',
                         body: frameFormData
                     });
 
                     // Upload GIF
-                    const gifPromise = generateGif(flippedImages, 800, 600).then(gifBlob => {
+                    const gifPromise = generateGif(flippedImages, 1920, 1080).then(gifBlob => {
                         const gifFormData = new FormData();
                         gifFormData.append('session_code', session.session_code);
                         gifFormData.append('gif', gifBlob, 'animation.gif');
-                        return fetch('http://127.0.0.1:8000/api/v1/desktop/upload-gif', {
+                        return fetch('https://fotoqu.acaraqu.com/api/v1/desktop/upload-gif', {
                             method: 'POST',
                             body: gifFormData
                         });
@@ -350,7 +350,7 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
             try {
                 // We still want a timeout for the session completion signal
                 // so the user isn't stuck waiting for the QR code forever if valid.
-                const response = await fetchWithTimeout('http://127.0.0.1:8000/api/v1/desktop/complete-session', {
+                const response = await fetchWithTimeout('https://fotoqu.acaraqu.com/api/v1/desktop/complete-session', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ session_code: session.session_code })
@@ -415,7 +415,7 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
                                 onClick={handleManualPrint}
                                 disabled={!canPrint}
                                 variant="outline"
-                                className="flex-1 border-blue-200 text-blue-700 hover:bg-blue-50 disabled:opacity-50"
+                                className="flex-1 border-brand-picton/50 text-brand-teal hover:bg-brand-picton/10 disabled:opacity-50"
                             >
                                 <Printer className="w-4 h-4 mr-2" />
                                 {canPrint ? 'Cetak Lagi' : 'Batas Cetak Tercapai'}
@@ -460,7 +460,7 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
                             )}
 
                             <div className="flex flex-col gap-3">
-                                <Button onClick={handleSave} className="w-full bg-blue-600 hover:bg-blue-700 text-white">
+                                <Button onClick={handleSave} className="w-full bg-brand-curious hover:bg-brand-teal text-white">
                                     Coba Upload Lagi
                                 </Button>
                                 <Button onClick={handleDone} variant="outline" className="w-full">
@@ -490,7 +490,7 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
                                         onClick={handleManualPrint}
                                         disabled={!canPrint}
                                         variant="outline"
-                                        className="w-full mb-2 border-blue-200 text-blue-700 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        className="w-full mb-2 border-brand-picton/50 text-brand-teal hover:bg-brand-picton/10 disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                         <Printer className="w-4 h-4 mr-2" />
                                         {canPrint ? 'Cetak Foto' : 'Batas Cetak Tercapai'}
@@ -545,7 +545,7 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
 
                     {/* Active Background Pill */}
                     <div className="absolute inset-0 z-0">
-                        <div className={`absolute top-2 bottom-2 rounded-full bg-blue-600 transition-all duration-500 ease-in-out
+                        <div className={`absolute top-2 bottom-2 rounded-full bg-brand-curious transition-all duration-500 ease-in-out
                             ${step === 'review' ? 'left-2 w-[30%]' :
                                 step === 'frame' ? 'left-[35%] w-[33%]' :
                                     'left-[72%] w-[26%]'}
@@ -601,14 +601,14 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
                                         <motion.div
                                             whileHover={{ scale: 1.05, y: -10 }}
                                             className={`w-full max-w-[300px] aspect-[4/3] rounded-2xl overflow-hidden shadow-2xl bg-white transform transition-all duration-300 relative
-                                            ${isSelected ? 'border-4 border-blue-500 ring-4 ring-blue-200 scale-105 z-10' : 'border-4 border-white hover:scale-105 shadow-md hover:shadow-xl'}
+                                            ${isSelected ? 'border-4 border-brand-curious ring-4 ring-brand-picton/50 scale-105 z-10' : 'border-4 border-white hover:scale-105 shadow-md shadow-brand-curious/20 hover:shadow-xl'}
                                         `}
                                         >
                                             <img src={img} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
 
                                             {/* Selection Overlay */}
                                             {isSelected && (
-                                                <div className="absolute top-4 right-4 bg-blue-500 text-white rounded-full p-2 shadow-lg z-10">
+                                                <div className="absolute top-4 right-4 bg-brand-curious text-white rounded-full p-2 shadow-lg z-10">
                                                     <Check className="w-6 h-6" />
                                                 </div>
                                             )}
@@ -624,7 +624,7 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
                                                     className={`px-6 py-2 rounded-full font-bold shadow-lg transform transition-transform hover:scale-105
                                                         ${isSelected
                                                             ? 'bg-red-500 text-white hover:bg-red-600'
-                                                            : 'bg-blue-600 text-white hover:bg-blue-700'}
+                                                            : 'bg-brand-curious text-white hover:bg-brand-teal'}
                                                     `}
                                                 >
                                                     {isSelected ? 'Batal Pilih' : 'Pilih Foto'}
@@ -661,8 +661,8 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
                                     <button
                                         onClick={() => setSelectedTemplate(template)}
                                         className={`relative w-full aspect-[2/3] rounded-xl overflow-hidden border-4 transition-all shadow-md hover:shadow-xl ${selectedTemplate?.id === template.id
-                                            ? 'border-blue-600 scale-105 ring-4 ring-blue-200'
-                                            : 'border-white hover:border-blue-300'
+                                            ? 'border-brand-curious scale-105 ring-4 ring-brand-picton/50'
+                                            : 'border-white hover:border-brand-picton'
                                             } `}
                                     >
                                         <img
@@ -671,9 +671,9 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
                                             className="w-full h-full object-cover"
                                         />
                                         {selectedTemplate?.id === template.id && (
-                                            <div className="absolute inset-0 bg-blue-600/20 flex items-center justify-center backdrop-blur-[2px]">
+                                            <div className="absolute inset-0 bg-brand-curious/20 flex items-center justify-center backdrop-blur-[2px]">
                                                 <div className="bg-white rounded-full p-2 shadow-lg">
-                                                    <Check className="w-6 h-6 text-blue-600" />
+                                                    <Check className="w-6 h-6 text-brand-curious" />
                                                 </div>
                                             </div>
                                         )}
@@ -705,7 +705,7 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
                             disabled={selectedPhotos.length !== requiredSelection}
                             className={`min-w-[200px] shadow-lg transition-all
                                 ${selectedPhotos.length === requiredSelection
-                                    ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-600/30'
+                                    ? 'bg-brand-curious hover:bg-brand-teal text-white shadow-brand-curious/30'
                                     : 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none'}
                             `}
                         >
@@ -723,7 +723,7 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
                             size="lg"
                             onClick={handleSave}
                             disabled={!selectedTemplate || isSaving}
-                            className="min-w-[160px] bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-xl shadow-blue-600/30 border-none"
+                            className="min-w-[160px] bg-gradient-to-r from-brand-curious to-brand-teal hover:from-brand-teal hover:to-[#042e4f] text-white shadow-xl shadow-brand-curious/30 border-none"
                         >
                             {isSaving ? (
                                 <span className="flex items-center">

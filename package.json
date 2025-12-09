@@ -1,7 +1,7 @@
 {
   "name": "fotoqu-app",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.1",
   "description": "Professional Photobooth Application",
   "author": "FotoQu Team",
   "type": "module",
@@ -61,7 +61,7 @@
       "dist-electron/**/*"
     ],
     "mac": {
-      "icon": "build/icon.png",
+      "icon": "build/icon.icns",
       "target": "dmg",
       "hardenedRuntime": true,
       "category": "public.app-category.photography"

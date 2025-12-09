@@ -213,7 +213,7 @@ export const Capture = ({ onCapture, onBack, settings }: CaptureProps) => {
                                 Foto {currentShot} / {TOTAL_SHOTS}
                             </p>
                             {status !== 'countdown' && (
-                                <p className="text-yellow-300 font-medium text-lg animate-pulse">
+                                <p className="text-brand-orange font-medium text-lg animate-pulse">
                                     {message}
                                 </p>
                             )}
@@ -269,7 +269,7 @@ export const Capture = ({ onCapture, onBack, settings }: CaptureProps) => {
                                         setShowSettings(false);
                                     }}
                                     className={`w-full p-4 text-left rounded-xl transition-colors ${activeDeviceId === device.deviceId
-                                        ? 'bg-blue-50 text-blue-600 font-semibold'
+                                        ? 'bg-brand-curious/10 text-brand-curious font-semibold'
                                         : 'hover:bg-slate-50 text-slate-700'
                                         }`}
                                 >

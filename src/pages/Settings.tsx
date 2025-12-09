@@ -94,7 +94,7 @@ export const Settings = ({ onBack }: SettingsProps) => {
                                     value={accessToken}
                                     onChange={(e) => setAccessToken(e.target.value)}
                                     placeholder="Masukkan token akses dari Admin Panel"
-                                    className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition-all"
+                                    className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 focus:border-brand-curious focus:ring-2 focus:ring-brand-picton/50 outline-none transition-all"
                                 />
                             </div>
                         </div>
@@ -130,7 +130,7 @@ export const Settings = ({ onBack }: SettingsProps) => {
                             <select
                                 value={selectedPrinter}
                                 onChange={(e) => setSelectedPrinter(e.target.value)}
-                                className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none appearance-none bg-white transition-all"
+                                className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 focus:border-brand-curious focus:ring-2 focus:ring-brand-picton/50 outline-none appearance-none bg-white transition-all"
                             >
                                 <option value="">-- Pilih Printer --</option>
                                 {printers.map((p) => (
@@ -152,7 +152,7 @@ export const Settings = ({ onBack }: SettingsProps) => {
                             <select
                                 value={selectedCamera}
                                 onChange={(e) => setSelectedCamera(e.target.value)}
-                                className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none appearance-none bg-white transition-all"
+                                className="w-full pl-10 pr-4 py-2 rounded-xl border border-slate-200 focus:border-brand-curious focus:ring-2 focus:ring-brand-picton/50 outline-none appearance-none bg-white transition-all"
                             >
                                 <option value="">-- Pilih Kamera --</option>
                                 {cameras.map((c) => (
@@ -180,13 +180,13 @@ export const Settings = ({ onBack }: SettingsProps) => {
                                 onChange={(e) => setTestMode(e.target.checked)}
                                 className="sr-only peer"
                             />
-                            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-brand-picton/50 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-curious"></div>
                         </label>
                     </div>
 
                     <div className="pt-4 flex items-center justify-between">
                         <span className="text-green-600 font-medium text-sm">{status}</span>
-                        <Button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/30">
+                        <Button onClick={handleSave} className="bg-brand-curious hover:bg-brand-teal text-white shadow-lg shadow-brand-curious/30">
                             <Save className="w-5 h-5 mr-2" />
                             Simpan Pengaturan
                         </Button>

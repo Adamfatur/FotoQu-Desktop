@@ -7,9 +7,13 @@ export default {
   theme: {
     extend: {
       colors: {
-        primary: '#2563EB', // Royal Blue
+        primary: '#1a90d6', // Curious Blue
         secondary: '#FFFFFF', // White
         background: '#F8FAFC', // Slate 50
+        'brand-teal': '#053962',      // Teal Blue
+        'brand-orange': '#f19628',    // Carrot Orange
+        'brand-curious': '#1a90d6',   // Curious Blue
+        'brand-picton': '#1fa6ee',    // Picton Blue
       },
       fontFamily: {
         sans: ['Inter', 'sans-serif'],

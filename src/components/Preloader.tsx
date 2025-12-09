@@ -15,7 +15,7 @@ export const Preloader = ({ message = "Loading...", fullscreen = false }: Preloa
             <div className="relative w-24 h-24 mb-8">
                 {/* Outer Ring */}
                 <motion.div
-                    className="absolute inset-0 border-4 border-blue-500/30 rounded-full"
+                    className="absolute inset-0 border-4 border-brand-curious/30 rounded-full"
                     animate={{
                         scale: [1, 1.1, 1],
                         opacity: [0.3, 0.6, 0.3],
@@ -29,7 +29,7 @@ export const Preloader = ({ message = "Loading...", fullscreen = false }: Preloa
 
                 {/* Spinning Gradient Ring */}
                 <motion.div
-                    className="absolute inset-0 border-4 border-t-blue-500 border-r-purple-500 border-b-pink-500 border-l-transparent rounded-full"
+                    className="absolute inset-0 border-4 border-t-brand-curious border-r-brand-teal border-b-brand-orange border-l-transparent rounded-full"
                     animate={{ rotate: 360 }}
                     transition={{
                         duration: 1.5,
@@ -40,7 +40,7 @@ export const Preloader = ({ message = "Loading...", fullscreen = false }: Preloa
 
                 {/* Inner Pulsing Dot */}
                 <motion.div
-                    className="absolute inset-0 m-auto w-4 h-4 bg-white rounded-full shadow-[0_0_15px_rgba(59,130,246,0.8)]"
+                    className="absolute inset-0 m-auto w-4 h-4 bg-white rounded-full shadow-[0_0_15px_rgba(26,144,214,0.8)]"
                     animate={{
                         scale: [1, 1.5, 1],
                         opacity: [0.8, 1, 0.8],
@@ -67,7 +67,7 @@ export const Preloader = ({ message = "Loading...", fullscreen = false }: Preloa
                     {[0, 1, 2].map((i) => (
                         <motion.div
                             key={i}
-                            className="w-2 h-2 bg-blue-400 rounded-full"
+                            className="w-2 h-2 bg-brand-picton rounded-full"
                             animate={{
                                 y: [-5, 0, -5],
                                 opacity: [0.5, 1, 0.5],
