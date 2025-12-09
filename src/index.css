@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply select-none overflow-hidden bg-white text-slate-900;
+  }
+  img {
+    @apply select-none;
+    -webkit-user-drag: none;
+  }
+}
