@@ -55,6 +55,16 @@ const getFrameSlotCount = (frameSlots?: string | number, fallback: number = 3): 
 
 const getRequiredSelectionCount = (frameSlots: number): number => frameSlots === 2 ? 2 : 3;
 
+const getTemplatePhotoSlotCount = (template?: FrameTemplate | null): number | null => {
+    const slots = template?.config?.slots;
+    if (!Array.isArray(slots) || slots.length === 0) {
+        return null;
+    }
+
+    const photoSlots = slots.filter((slot) => !(slot.is_logo || slot.type === 'logo'));
+    return photoSlots.length > 0 ? photoSlots.length : null;
+};
+
 const getPhotosToProcessForFrame = (photos: CapturedImage[], frameSlots: number): string[] | null => {
     const requiredSelectionCount = getRequiredSelectionCount(frameSlots);
 
@@ -123,20 +133,12 @@ export const Preview = ({ images, sessionMediaList, onSave, session }: PreviewPr
     // Photo Selection State
     const [selectedPhotos, setSelectedPhotos] = useState<CapturedImage[]>([]);
 
-    // Determine how many photos are needed.
-    // Logic:
-    // 2 slots -> 2 photos
-    // 6 slots -> 3 photos (duplicated)
-    // Default fallback -> 3
-    // Use Number() to handle potential string values from backend
-    // Also check printType: if 'strip', default to 6 slots if not specified
-    let frameSlots = session?.frame_slots
+    // Determine slot count from session first, then selected template, then template config slots.
+    // This avoids forcing 6-slot behavior on 2-slot templates when session.frame_slots is missing.
+    const templatePhotoSlotCount = getTemplatePhotoSlotCount(selectedTemplate);
+    const frameSlots = session?.frame_slots
         ? getFrameSlotCount(session.frame_slots, 3)
-        : getFrameSlotCount(selectedTemplate?.frame_slots, 3);
-
-    if (printType === 'strip' && (!session?.frame_slots)) {
-        frameSlots = 6;
-    }
+        : getFrameSlotCount(selectedTemplate?.frame_slots, templatePhotoSlotCount ?? 3);
 
     const requiredSelection = getRequiredSelectionCount(frameSlots);
 
