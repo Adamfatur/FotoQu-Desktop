@@ -9,8 +9,10 @@ export const useCamera = () => {
     const [stream, setStream] = useState<MediaStream | null>(null);
     const [devices, setDevices] = useState<CameraDevice[]>([]);
     const [activeDeviceId, setActiveDeviceId] = useState<string>('');
+    const [isCameraReady, setIsCameraReady] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
+    const streamRef = useRef<MediaStream | null>(null);
 
     const getDevices = useCallback(async () => {
         try {
@@ -58,37 +60,66 @@ export const useCamera = () => {
     }, [activeDeviceId]);
 
     useEffect(() => {
-        getDevices();
-        navigator.mediaDevices.addEventListener('devicechange', getDevices);
+        const handleDeviceChange = () => {
+            void getDevices();
+        };
+
+        queueMicrotask(handleDeviceChange);
+        navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange);
+
         return () => {
-            navigator.mediaDevices.removeEventListener('devicechange', getDevices);
+            navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange);
         };
     }, [getDevices]);
 
     useEffect(() => {
         let currentStream: MediaStream | null = null;
+        let detachVideoListeners: (() => void) | null = null;
 
         const initStream = async () => {
             if (!activeDeviceId) return;
 
             try {
-                if (stream) {
-                    stream.getTracks().forEach(t => t.stop());
+                setIsCameraReady(false);
+
+                if (streamRef.current) {
+                    streamRef.current.getTracks().forEach(t => t.stop());
                 }
 
                 const newStream = await navigator.mediaDevices.getUserMedia({
                     video: {
                         deviceId: { exact: activeDeviceId },
-                        width: { ideal: 1920 },
-                        height: { ideal: 1080 }
+                        width: { ideal: 3840 }, // Try 4K if supported, fallback to lower
+                        height: { ideal: 2160 }
                     }
                 });
 
                 currentStream = newStream;
+                streamRef.current = newStream;
                 setStream(newStream);
 
                 if (videoRef.current) {
-                    videoRef.current.srcObject = newStream;
+                    const video = videoRef.current;
+                    const markReady = () => {
+                        if (video.videoWidth > 0 && video.videoHeight > 0) {
+                            setIsCameraReady(true);
+                        }
+                    };
+
+                    video.srcObject = newStream;
+                    video.addEventListener('loadedmetadata', markReady);
+                    video.addEventListener('canplay', markReady);
+                    video.addEventListener('playing', markReady);
+
+                    if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+                        markReady();
+                    }
+
+                    detachVideoListeners = () => {
+                        video.removeEventListener('loadedmetadata', markReady);
+                        video.removeEventListener('canplay', markReady);
+                        video.removeEventListener('playing', markReady);
+                    };
                 }
                 setError(null);
 
@@ -103,13 +134,18 @@ export const useCamera = () => {
         initStream();
 
         return () => {
+            setIsCameraReady(false);
+            detachVideoListeners?.();
             if (currentStream) {
                 currentStream.getTracks().forEach(t => t.stop());
+                if (streamRef.current === currentStream) {
+                    streamRef.current = null;
+                }
             }
         };
-    }, [activeDeviceId]);
+    }, [activeDeviceId, getDevices]);
 
-    const captureImage = useCallback(() => {
+    const captureImage = useCallback(async (): Promise<Blob | null> => {
         if (!videoRef.current || !stream) return null;
 
         const video = videoRef.current;
@@ -120,20 +156,22 @@ export const useCamera = () => {
         const ctx = canvas.getContext('2d');
         if (!ctx) return null;
 
-        // Flip horizontally if mirrored (usually front cams are mirrored in UI, but saved image should be as seen or flipped? 
-        // Standard photobooth mirrors preview, and saves mirrored result so it looks like what user saw)
-        ctx.translate(canvas.width, 0);
-        ctx.scale(-1, 1);
+        // Ensure high quality scaling
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
 
         ctx.drawImage(video, 0, 0);
 
-        return canvas.toDataURL('image/jpeg', 0.95);
+        return await new Promise<Blob | null>((resolve) => {
+            canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 1.0);
+        });
     }, [stream]);
 
     return {
         stream,
         devices,
         activeDeviceId,
+        isCameraReady,
         setActiveDeviceId,
         error,
         videoRef,

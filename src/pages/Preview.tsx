@@ -2,18 +2,86 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Printer, Check } from 'lucide-react';
 import { Button } from '../components/Button';
-import { generateFinalFrame, generateWatermarkedPhoto, dataURLtoFile } from '../utils/frameProcessing';
+import { blobToObjectURL, generateFinalFrameBlob } from '../utils/frameProcessing';
+import type { FrameConfig } from '../utils/frameProcessing';
 import { generateGif } from '../utils/gifGenerator';
 import QRCode from 'react-qr-code';
+import type { SessionMedia, CapturedImage } from '../types/media';
+import { buildDesktopApiUrl, DEFAULT_SERVER_BASE_URL, normalizeServerBaseUrl } from '../utils/serverConfig';
 
 interface PreviewProps {
-    images: string[];
+    images: CapturedImage[];
+    sessionMediaList?: SessionMedia[];
     onSave: () => void;
     onRetake: () => void;
-    session: any;
+    session: {
+        session_code?: string;
+        isTestMode?: boolean;
+        frame_slots?: string | number;
+        frame_design?: string | number;
+        package?: {
+            print_type?: string;
+            print_count?: string | number;
+        };
+    };
 }
 
-export const Preview = ({ images, onSave, session }: PreviewProps) => {
+interface FrameTemplate {
+    id?: string | number;
+    name?: string;
+    image_url: string;
+    preview_url?: string;
+    config?: FrameConfig;
+    frame_slots?: string | number;
+    updated_at?: string;
+}
+
+interface GeneratedFrame {
+    url: string;
+    blob: Blob;
+}
+
+type TemplatePreviewStatus = 'idle' | 'loading' | 'ready' | 'error';
+
+const getFrameSlotCount = (frameSlots?: string | number, fallback: number = 3): number => {
+    const numericFrameSlots = Number(frameSlots);
+
+    if (Number.isFinite(numericFrameSlots) && numericFrameSlots > 0) {
+        return numericFrameSlots;
+    }
+
+    return fallback;
+};
+
+const getRequiredSelectionCount = (frameSlots: number): number => frameSlots === 2 ? 2 : 3;
+
+const getPhotosToProcessForFrame = (photos: CapturedImage[], frameSlots: number): string[] | null => {
+    const requiredSelectionCount = getRequiredSelectionCount(frameSlots);
+
+    if (photos.length < requiredSelectionCount) {
+        return null;
+    }
+
+    const selectedPhotoUrls = photos
+        .slice(0, requiredSelectionCount)
+        .map((photo) => photo.url);
+
+    if (frameSlots === 6 && selectedPhotoUrls.length === 3) {
+        return selectedPhotoUrls.flatMap((photoUrl) => [photoUrl, photoUrl]);
+    }
+
+    return selectedPhotoUrls;
+};
+
+const getTemplateKey = (template: FrameTemplate): string => {
+    if (template.id != null) {
+        return String(template.id);
+    }
+
+    return template.image_url;
+};
+
+export const Preview = ({ images, sessionMediaList, onSave, session }: PreviewProps) => {
     const [isSaving, setIsSaving] = useState(false);
     const [printCount, setPrintCount] = useState(0);
 
@@ -26,7 +94,7 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
     // Explicitly check for 'none'
     const isDigitalOnly = printType === 'none';
 
-    const maxPrints = printType === 'custom' ? (packageInfo.print_count || 1) : 1;
+    const maxPrints = printType === 'custom' ? Number(packageInfo.print_count ?? 1) : 1;
 
     // Check if printing is allowed based on current count
     // Check if printing is allowed based on current count
@@ -37,45 +105,51 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
     // If not, we might need to add it, but usually it is. In this case, we rely on it being available or added.
     // Wait, let's just make sure it's used correctly in return.
 
-    const [finalImage, setFinalImage] = useState<string | null>(null);
-    const [templates, setTemplates] = useState<any[]>([]);
-    const [selectedTemplate, setSelectedTemplate] = useState<any>(null);
+    const [finalImage, setFinalImage] = useState<GeneratedFrame | null>(null);
+    const [templates, setTemplates] = useState<FrameTemplate[]>([]);
+    const [selectedTemplate, setSelectedTemplate] = useState<FrameTemplate | null>(null);
+    const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
+    const [templateFetchError, setTemplateFetchError] = useState<string | null>(null);
+    const [templatePreviewUrls, setTemplatePreviewUrls] = useState<Record<string, string>>({});
+    const [templatePreviewStatus, setTemplatePreviewStatus] = useState<Record<string, TemplatePreviewStatus>>({});
     const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
     const [step, setStep] = useState<'review' | 'frame' | 'preview'>('review');
     const [statusMessage, setStatusMessage] = useState('');
     const [uploadFailed, setUploadFailed] = useState(false);
     const [zoomedPhoto, setZoomedPhoto] = useState<string | null>(null);
     const [showTestResult, setShowTestResult] = useState(false);
+    const [serverBaseUrl, setServerBaseUrl] = useState(DEFAULT_SERVER_BASE_URL);
 
     // Photo Selection State
-    const [selectedPhotos, setSelectedPhotos] = useState<string[]>([]);
+    const [selectedPhotos, setSelectedPhotos] = useState<CapturedImage[]>([]);
 
     // Determine how many photos are needed.
-    // Logic: 
+    // Logic:
     // 2 slots -> 2 photos
-    // 4 slots -> 4 photos
     // 6 slots -> 3 photos (duplicated)
     // Default fallback -> 3
     // Use Number() to handle potential string values from backend
     // Also check printType: if 'strip', default to 6 slots if not specified
-    let frameSlots = session?.frame_slots ? Number(session.frame_slots) : (selectedTemplate?.frame_slots ? Number(selectedTemplate.frame_slots) : 3);
+    let frameSlots = session?.frame_slots
+        ? getFrameSlotCount(session.frame_slots, 3)
+        : getFrameSlotCount(selectedTemplate?.frame_slots, 3);
 
     if (printType === 'strip' && (!session?.frame_slots)) {
         frameSlots = 6;
     }
 
-    const requiredSelection = frameSlots === 6 ? 3 : (frameSlots === 2 ? 2 : (frameSlots === 4 ? 4 : 3));
+    const requiredSelection = getRequiredSelectionCount(frameSlots);
 
     // Auto-select if count matches
     useEffect(() => {
         if (images.length === requiredSelection && selectedPhotos.length === 0) {
             setSelectedPhotos([...images]);
         }
-    }, [images, requiredSelection]);
+    }, [images, requiredSelection, selectedPhotos.length]);
 
-    const togglePhotoSelection = (img: string) => {
-        if (selectedPhotos.includes(img)) {
-            setSelectedPhotos(prev => prev.filter(p => p !== img));
+    const togglePhotoSelection = (img: CapturedImage) => {
+        if (selectedPhotos.some((photo) => photo.id === img.id)) {
+            setSelectedPhotos(prev => prev.filter(p => p.id !== img.id));
         } else {
             if (selectedPhotos.length < requiredSelection) {
                 setSelectedPhotos(prev => [...prev, img]);
@@ -86,89 +160,197 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
     const [savedLocalPath, setSavedLocalPath] = useState<string | null>(null);
 
     const [errorMessage, setErrorMessage] = useState('');
+    const templatePreviewUrlsRef = useRef<Record<string, string>>({});
 
-    const uploadPromises = useRef<Promise<any>[]>([]);
-
-    // Fetch templates on mount
     useEffect(() => {
-        const fetchTemplates = async () => {
-            try {
-                const response = await fetch('https://fotoqu.acaraqu.com/api/v1/desktop/frames');
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.success && data.templates.length > 0) {
-                        setTemplates(data.templates);
-                        setSelectedTemplate(data.templates[0]); // Select first by default
-                    }
-                }
-            } catch (error) {
-                console.error("Failed to fetch templates:", error);
-            }
-        };
-        fetchTemplates();
-    }, []);
-
-    // Generate frame when images or selected template changes
-    useEffect(() => {
-        const generate = async () => {
-            // Only generate if we have enough selected photos
-            if (!selectedTemplate || selectedPhotos.length !== requiredSelection) return;
-
-            try {
-                // IF 6 slots (strips) and we have 3 photos, duplicate them INTERLEAVED
-                // [A, B, C] -> [A, A, B, B, C, C] to match Row-Major slots (L, R, L, R...)
-                let photosToProcess = [...selectedPhotos];
-                if (frameSlots === 6 && selectedPhotos.length === 3) {
-                    photosToProcess = selectedPhotos.flatMap(p => [p, p]);
-                }
-
-                // Pass the template URL and config to the generator
-                const result = await generateFinalFrame(photosToProcess, selectedTemplate.image_url, selectedTemplate.config);
-                setFinalImage(result);
-            } catch (err) {
-                console.error("Failed to generate frame:", err);
-            }
-        };
-
-        generate();
-    }, [selectedPhotos, selectedTemplate, requiredSelection, frameSlots]);
-
-    // Background upload of raw photos
-    useEffect(() => {
-        if (session && images.length > 0 && uploadPromises.current.length === 0) {
-            if (session.isTestMode) {
-                console.log("Test Mode: Skipping background upload");
+        const loadServerSettings = async () => {
+            if (!window.fotoQuAPI) {
                 return;
             }
 
-            const promises = images.map(async (img, i) => {
-                try {
-                    // Generate watermarked version
-                    // Generate watermarked version
-                    const watermarkedDataUrl = await generateWatermarkedPhoto(img);
-                    const file = dataURLtoFile(watermarkedDataUrl, `photo_${i + 1}.jpg`);
+            const settings = await window.fotoQuAPI.getSettings();
+            setServerBaseUrl(normalizeServerBaseUrl(settings.serverBaseUrl));
+        };
 
-                    const formData = new FormData();
-                    formData.append('session_code', session.session_code);
-                    formData.append('photo', file);
-                    formData.append('sequence', (i + 1).toString());
+        void loadServerSettings();
+    }, []);
 
-                    await fetch('https://fotoqu.acaraqu.com/api/v1/desktop/upload-photo', {
-                        method: 'POST',
-                        body: formData
-                    });
-                    console.log(`Photo ${i + 1} uploaded in background`);
-                } catch (err) {
-                    console.error(`Failed to upload photo ${i + 1}: `, err);
-                    // We don't throw here to allow other uploads to proceed
-                    // handleSave will check/retry if needed or we just accept partial failure in offline mode
-                }
+    useEffect(() => {
+        return () => {
+            Object.values(templatePreviewUrlsRef.current).forEach((previewUrl) => {
+                URL.revokeObjectURL(previewUrl);
             });
-            uploadPromises.current = promises;
+        };
+    }, []);
+
+    // Fetch templates when entering the frame step so admin edits are picked up immediately.
+    useEffect(() => {
+        if (step !== 'frame') {
+            return;
         }
-    }, [session, images]);
 
+        let cancelled = false;
 
+        const fetchTemplates = async () => {
+            setIsLoadingTemplates(true);
+            setTemplateFetchError(null);
+
+            try {
+                const apiUrl = buildDesktopApiUrl(serverBaseUrl, `/api/v1/desktop/frames?ts=${Date.now()}`);
+                console.log('[FotoQu] Fetching templates from:', apiUrl);
+
+                const response = await fetch(apiUrl, {
+                    cache: 'no-store',
+                    headers: {
+                        'Cache-Control': 'no-cache',
+                        'Pragma': 'no-cache',
+                    },
+                });
+
+                console.log('[FotoQu] Template API response status:', response.status);
+
+                if (response.ok) {
+                    const data: { success?: boolean; templates?: FrameTemplate[] } = await response.json();
+                    const nextTemplates = data.templates ?? [];
+                    console.log('[FotoQu] Templates received:', nextTemplates.length);
+
+                    if (!cancelled && data.success && nextTemplates.length > 0) {
+                        const preferredTemplateId = session?.frame_design != null
+                            ? String(session.frame_design)
+                            : null;
+
+                        setTemplates(nextTemplates);
+                        setSelectedTemplate((currentTemplate) => {
+                            const currentTemplateId = currentTemplate?.id != null
+                                ? String(currentTemplate.id)
+                                : null;
+
+                            const preferredTemplate = preferredTemplateId
+                                ? nextTemplates.find((template) => String(template.id) === preferredTemplateId)
+                                : null;
+                            const preservedTemplate = currentTemplateId
+                                ? nextTemplates.find((template) => String(template.id) === currentTemplateId)
+                                : null;
+
+                            return preferredTemplate ?? preservedTemplate ?? nextTemplates[0];
+                        });
+                    } else if (!cancelled && nextTemplates.length === 0) {
+                        setTemplateFetchError('Server tidak memiliki template frame aktif.');
+                    }
+                } else {
+                    if (!cancelled) {
+                        setTemplateFetchError(`Server error: ${response.status} ${response.statusText}`);
+                    }
+                }
+            } catch (error) {
+                console.error('[FotoQu] Failed to fetch templates:', error);
+                if (!cancelled) {
+                    setTemplateFetchError(
+                        error instanceof Error
+                            ? `Gagal memuat template: ${error.message}`
+                            : 'Gagal memuat template frame.'
+                    );
+                }
+            } finally {
+                if (!cancelled) {
+                    setIsLoadingTemplates(false);
+                }
+            }
+        };
+
+        void fetchTemplates();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [serverBaseUrl, session?.frame_design, step]);
+
+    useEffect(() => {
+        if (step !== 'frame' || templates.length === 0) {
+            return;
+        }
+
+        const photosToProcess = getPhotosToProcessForFrame(selectedPhotos, frameSlots);
+        if (!photosToProcess) {
+            return;
+        }
+
+        let cancelled = false;
+
+        Object.values(templatePreviewUrlsRef.current).forEach((previewUrl) => {
+            URL.revokeObjectURL(previewUrl);
+        });
+        templatePreviewUrlsRef.current = {};
+        setTemplatePreviewUrls({});
+        setTemplatePreviewStatus(
+            Object.fromEntries(templates.map((template) => [getTemplateKey(template), 'loading'])) as Record<string, TemplatePreviewStatus>
+        );
+
+        const generateTemplatePreviews = async () => {
+            await Promise.allSettled(templates.map(async (template) => {
+                const templateKey = getTemplateKey(template);
+                const previewSourceUrl = template.preview_url || template.image_url;
+
+                try {
+                    const previewBlob = await generateFinalFrameBlob(
+                        photosToProcess,
+                        previewSourceUrl,
+                        template.config,
+                        {
+                            targetHeight: 960,
+                            quality: 0.92,
+                        },
+                    );
+                    const previewUrl = blobToObjectURL(previewBlob);
+
+                    if (cancelled) {
+                        URL.revokeObjectURL(previewUrl);
+                        return;
+                    }
+
+                    setTemplatePreviewUrls((previousUrls) => {
+                        const previousUrl = previousUrls[templateKey];
+                        if (previousUrl && previousUrl !== previewUrl) {
+                            URL.revokeObjectURL(previousUrl);
+                        }
+
+                        const nextUrls = {
+                            ...previousUrls,
+                            [templateKey]: previewUrl,
+                        };
+                        templatePreviewUrlsRef.current = nextUrls;
+                        return nextUrls;
+                    });
+                    setTemplatePreviewStatus((previousStatus) => ({
+                        ...previousStatus,
+                        [templateKey]: 'ready',
+                    }));
+                } catch (error) {
+                    console.error('[FotoQu] Failed to generate template preview:', template.name, error);
+                    if (!cancelled) {
+                        setTemplatePreviewStatus((previousStatus) => ({
+                            ...previousStatus,
+                            [templateKey]: 'error',
+                        }));
+                    }
+                }
+            }));
+        };
+
+        void generateTemplatePreviews();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [frameSlots, selectedPhotos, step, templates]);
+
+    useEffect(() => {
+        return () => {
+            if (finalImage) {
+                URL.revokeObjectURL(finalImage.url);
+            }
+        };
+    }, [finalImage]);
 
     const handleManualPrint = async () => {
         if (!savedLocalPath || !window.fotoQuAPI?.print) return;
@@ -205,43 +387,28 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
         setUploadFailed(false);
         setErrorMessage('');
 
+        const sessionCode = session.session_code;
+        if (!session.isTestMode && !sessionCode) {
+            setErrorMessage('Session code tidak tersedia.');
+            setUploadFailed(true);
+            setIsSaving(false);
+            return;
+        }
+
         try {
-            // 1. Flip images horizontally (fix mirroring)
-            const flippedImages = await Promise.all(images.map(async (src) => {
-                const img = new Image();
-                img.src = src;
-                await new Promise(r => img.onload = r);
-
-                const canvas = document.createElement('canvas');
-                canvas.width = img.width;
-                canvas.height = img.height;
-                const ctx = canvas.getContext('2d');
-                if (!ctx) return src;
-
-                ctx.translate(canvas.width, 0);
-                ctx.scale(-1, 1);
-                ctx.drawImage(img, 0, 0);
-
-                return canvas.toDataURL('image/jpeg', 0.95);
-            }));
-
-            // 2. Generate Final Frame with flipped *SELECTED* images
+            // 1. Generate Final Frame with selected images
             setStatusMessage('Membuat Frame Final...');
 
-            // Map selected photos to their flipped versions
-            const flippedSelectedPhotos = selectedPhotos.map(selectedSrc => {
-                const index = images.indexOf(selectedSrc);
-                return index !== -1 ? flippedImages[index] : selectedSrc;
-            });
-
-            // Handle duplication for strips (INTERLEAVED)
-            let photosToProcess = [...flippedSelectedPhotos];
-            if (frameSlots === 6 && flippedSelectedPhotos.length === 3) {
-                photosToProcess = flippedSelectedPhotos.flatMap(p => [p, p]);
+            const photosToProcess = getPhotosToProcessForFrame(selectedPhotos, frameSlots);
+            if (!photosToProcess) {
+                setErrorMessage('Jumlah foto terpilih belum sesuai dengan frame.');
+                setUploadFailed(true);
+                setIsSaving(false);
+                return;
             }
 
             // Use exact 4R dimensions (100x148mm @ 300dpi = 1181x1748)
-            let currentFinalImage = await generateFinalFrame(photosToProcess, selectedTemplate.image_url, selectedTemplate.config);
+            let currentFinalImageBlob = await generateFinalFrameBlob(photosToProcess, selectedTemplate.image_url, selectedTemplate.config);
 
             // Resize to exact 4R borderless (1181x1748)
             try {
@@ -250,7 +417,8 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
                     frameImg.onload = resolve;
                     frameImg.onerror = reject;
                 });
-                frameImg.src = currentFinalImage;
+                const currentFinalImageUrl = blobToObjectURL(currentFinalImageBlob);
+                frameImg.src = currentFinalImageUrl;
                 await loadPromise;
 
                 const finalCanvas = document.createElement('canvas');
@@ -258,17 +426,46 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
                 finalCanvas.height = 1748;
                 const finalCtx = finalCanvas.getContext('2d');
                 if (finalCtx) {
+                    finalCtx.imageSmoothingEnabled = true;
+                    finalCtx.imageSmoothingQuality = 'high';
                     finalCtx.drawImage(frameImg, 0, 0, 1181, 1748);
-                    currentFinalImage = finalCanvas.toDataURL('image/jpeg', 0.95);
+                    currentFinalImageBlob = await new Promise<Blob>((resolve, reject) => {
+                        finalCanvas.toBlob((blob) => {
+                            if (blob) {
+                                resolve(blob);
+                                return;
+                            }
+
+                            reject(new Error('Failed to create resized frame blob'));
+                        }, 'image/jpeg', 1.0);
+                    });
                 }
+                URL.revokeObjectURL(currentFinalImageUrl);
             } catch (resizeErr) {
                 console.error("Resize failed, using original:", resizeErr);
             }
 
+            const nextFinalImage = {
+                blob: currentFinalImageBlob,
+                url: blobToObjectURL(currentFinalImageBlob),
+            };
+
+            setFinalImage((previousFrame) => {
+                if (previousFrame) {
+                    URL.revokeObjectURL(previousFrame.url);
+                }
+
+                return nextFinalImage;
+            });
+
             // 3. Save locally (CRITICAL STEP - Must succeed)
             if (window.fotoQuAPI?.savePhoto) {
                 setStatusMessage('Menyimpan ke komputer...');
-                const savedPath = await window.fotoQuAPI.savePhoto(currentFinalImage);
+                const savedPath = await window.fotoQuAPI.savePhoto({
+                    data: new Uint8Array(await currentFinalImageBlob.arrayBuffer()),
+                    mimeType: currentFinalImageBlob.type || 'image/jpeg',
+                    extension: 'jpg',
+                });
                 setSavedLocalPath(savedPath);
 
                 // Auto print logic
@@ -290,71 +487,93 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
                 return;
             }
 
-            // 4. Background Network Operations (Fire and Forget)
-            // Function to handle heavy uploads continuously in the background
-            const uploadMediaInBackground = async () => {
-                console.log("Starting background media uploads...");
-                try {
-                    // Upload raw photos
-                    const photosToUpload = flippedImages.slice(0, 3);
-                    const uploadPromisesList = photosToUpload.map((imgData, i) => {
-                        const file = dataURLtoFile(imgData, `photo_${i + 1}.jpg`);
-                        const formData = new FormData();
-                        formData.append('session_code', session.session_code);
-                        formData.append('photo', file);
-                        formData.append('sequence', (i + 1).toString());
-
-                        // Remove timeout for background uploads - let them run until completion
-                        return fetch('https://fotoqu.acaraqu.com/api/v1/desktop/upload-photo', {
-                            method: 'POST',
-                            body: formData
-                        });
+            // 4. Upload all media (photos, frame, GIF, boomerang)
+            // Await ALL uploads before completing session to ensure everything is saved
+            setStatusMessage('Mengunggah foto...');
+            try {
+                // Upload raw photos
+                const photoUploadPromises = images.map(async (image, i) => {
+                    const file = new File([image.blob], `photo_${i + 1}.jpg`, {
+                        type: image.blob.type || 'image/jpeg',
                     });
-
-                    // Upload Frame
-                    const frameFile = dataURLtoFile(currentFinalImage, 'final_frame.jpg');
-                    const frameFormData = new FormData();
-                    frameFormData.append('session_code', session.session_code);
-                    frameFormData.append('frame', frameFile);
-
-                    const frameUploadPromise = fetch('https://fotoqu.acaraqu.com/api/v1/desktop/upload-frame', {
+                    const formData = new FormData();
+                    formData.append('session_code', sessionCode ?? '');
+                    formData.append('photo', file);
+                    formData.append('sequence', (i + 1).toString());
+                    return fetch(buildDesktopApiUrl(serverBaseUrl, '/api/v1/desktop/upload-photo'), {
                         method: 'POST',
-                        body: frameFormData
+                        body: formData,
                     });
+                });
 
-                    // Upload GIF
-                    const gifPromise = generateGif(flippedImages, 1920, 1080).then(gifBlob => {
-                        const gifFormData = new FormData();
-                        gifFormData.append('session_code', session.session_code);
-                        gifFormData.append('gif', gifBlob, 'animation.gif');
-                        return fetch('https://fotoqu.acaraqu.com/api/v1/desktop/upload-gif', {
-                            method: 'POST',
-                            body: gifFormData
-                        });
+                // Upload Frame
+                const frameFile = new File([currentFinalImageBlob], 'final_frame.jpg', {
+                    type: currentFinalImageBlob.type || 'image/jpeg',
+                });
+                const frameFormData = new FormData();
+                frameFormData.append('session_code', sessionCode ?? '');
+                frameFormData.append('frame', frameFile);
+                const frameUploadPromise = fetch(buildDesktopApiUrl(serverBaseUrl, '/api/v1/desktop/upload-frame'), {
+                    method: 'POST',
+                    body: frameFormData,
+                });
+
+                // Generate GIF animation (photo slideshow as MP4) — always
+                setStatusMessage('Membuat GIF animasi...');
+                const gifBlob = await generateGif(images.map((image) => image.url));
+                const gifFilename = gifBlob.type.startsWith('video/')
+                    ? `animation.${gifBlob.type.includes('mp4') ? 'mp4' : 'webm'}`
+                    : 'animation.gif';
+                const gifFormData = new FormData();
+                gifFormData.append('session_code', sessionCode ?? '');
+                gifFormData.append('media_kind', 'gif');
+                gifFormData.append('gif', gifBlob, gifFilename);
+                const gifUploadPromise = fetch(buildDesktopApiUrl(serverBaseUrl, '/api/v1/desktop/upload-gif'), {
+                    method: 'POST',
+                    body: gifFormData,
+                });
+
+                // Upload boomerang media captured during the session
+                const mediaUploadPromises = (sessionMediaList ?? []).map((media) => {
+                    const ext = media.blob.type.includes('mp4') ? 'mp4' : 'webm';
+                    const filename = `${media.kind}.${ext}`;
+                    const formData = new FormData();
+                    formData.append('session_code', sessionCode ?? '');
+                    formData.append('media_kind', media.kind);
+                    formData.append('gif', media.blob, filename);
+                    return fetch(buildDesktopApiUrl(serverBaseUrl, '/api/v1/desktop/upload-gif'), {
+                        method: 'POST',
+                        body: formData,
                     });
+                });
 
-                    // Execute all uploads concurrently
-                    await Promise.all([...uploadPromisesList, frameUploadPromise, gifPromise]);
-                    console.log("Background uploads completed successfully");
-                } catch (bgError) {
-                    // We log this but don't disrupt the user as they assume it's working
-                    console.error("Background upload encountered an issue:", bgError);
+                // Execute all uploads concurrently and AWAIT completion
+                setStatusMessage('Mengunggah semua media...');
+                const uploadResults = await Promise.allSettled([
+                    ...photoUploadPromises,
+                    frameUploadPromise,
+                    gifUploadPromise,
+                    ...mediaUploadPromises,
+                ]);
+
+                const failedUploads = uploadResults.filter((r) => r.status === 'rejected');
+                if (failedUploads.length > 0) {
+                    console.warn(`${failedUploads.length} upload(s) failed:`, failedUploads);
                 }
-            };
+            } catch (uploadError) {
+                console.error('Media upload error:', uploadError);
+                // Continue to session completion even if some uploads fail
+                // Local files are safe and S3 sync will retry
+            }
 
-            // TRIGGER BACKGROUND UPLOADS - DO NOT AWAIT
-            uploadMediaInBackground();
-
-            // 5. Complete Session & Get QR (Lightweight)
+            // 5. Complete Session & Get QR
             setStatusMessage('Finalisasi...');
             try {
-                // We still want a timeout for the session completion signal
-                // so the user isn't stuck waiting for the QR code forever if valid.
-                const response = await fetchWithTimeout('https://fotoqu.acaraqu.com/api/v1/desktop/complete-session', {
+                const response = await fetchWithTimeout(buildDesktopApiUrl(serverBaseUrl, '/api/v1/desktop/complete-session'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ session_code: session.session_code })
-                }, 10000); // 10s timeout for status update
+                    body: JSON.stringify({ session_code: sessionCode })
+                }, 10000);
 
                 if (response.ok) {
                     const data = await response.json();
@@ -364,19 +583,11 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
                         return;
                     }
                 }
-                // If response not ok or success false, fall through to catch
                 throw new Error('Gagal mendapatkan QR Code');
             } catch (completionError) {
                 console.warn("Session completion signal failed:", completionError);
-                // Even if completion signal fails, uploads are running. 
-                // We show an offline success state because the local files are safe.
-                setUploadFailed(true); // This triggers the 'Offline Success' UI (Checkmark or Warning depending on logic)
-                // We customized logic: if uploadFailed=true, it shows warning. 
-                // We should probably just show success if we are confident uploads are running?
-                // Actually, if we can't get the QR code, we HAVE to show the 'Offline' state 
-                // because we can't show the QR code component without a URL.
-                // The 'Offline' state in this app acts as a 'Success but check Admin' state.
-                setErrorMessage('Koneksi lambat. Foto sedang diunggah di latar belakang & tersimpan di komputer.');
+                setUploadFailed(true);
+                setErrorMessage('Koneksi lambat. Foto tersimpan di komputer & sedang diunggah.');
             }
 
         } catch (error) {
@@ -405,7 +616,7 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
 
                     <div className="flex-1 min-h-0 bg-slate-100 rounded-xl border border-slate-200 mb-6 flex items-center justify-center overflow-hidden p-2">
                         {finalImage && (
-                            <img src={finalImage} alt="Final Result" className="max-h-full max-w-full object-contain shadow-sm rounded-lg" />
+                            <img src={finalImage.url} alt="Final Result" className="max-h-full max-w-full object-contain shadow-sm rounded-lg" />
                         )}
                     </div>
 
@@ -508,8 +719,14 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
         );
     }
 
+    const selectedTemplatePreviewUrl = selectedTemplate
+        ? templatePreviewUrls[getTemplateKey(selectedTemplate)]
+            || selectedTemplate.preview_url
+            || selectedTemplate.image_url
+        : null;
+
     return (
-        <div className="relative z-10 flex-1 flex flex-col bg-slate-50/50">
+        <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden bg-slate-50/50">
             {/* Zoomed Photo Overlay */}
             <AnimatePresence>
                 {zoomedPhoto && (
@@ -540,7 +757,7 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
             </AnimatePresence>
 
             {/* Steps Indicator */}
-            <div className="flex justify-center mb-10 pt-8">
+            <div className="flex shrink-0 justify-center mb-6 pt-6 px-4">
                 <div className="flex items-center bg-white rounded-full shadow-2xl p-2 px-10 relative overflow-hidden">
 
                     {/* Active Background Pill */}
@@ -572,23 +789,24 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
             </div>
 
             {/* Step Content */}
-            <div className="flex-1 flex flex-col items-center justify-center">
+            <div className="flex-1 min-h-0 flex flex-col items-center justify-start overflow-hidden">
                 {step === 'review' && (
                     <motion.div
                         initial={{ opacity: 0, x: 20 }}
                         animate={{ opacity: 1, x: 0 }}
-                        className="w-full max-w-4xl"
+                        className="w-full max-w-4xl flex flex-1 min-h-0 flex-col"
                     >
                         <h2 className="text-4xl font-black text-center text-slate-800 mb-2">Review Hasil Fotomu</h2>
-                        <p className="text-center text-slate-500 mb-10 text-lg">
+                        <p className="text-center text-slate-500 mb-6 text-lg">
                             {selectedPhotos.length === requiredSelection
                                 ? 'Foto siap dicetak!'
                                 : `Pilih ${requiredSelection} foto terbaikmu (${selectedPhotos.length}/${requiredSelection})`}
                         </p>
 
-                        <div className="flex flex-wrap justify-center gap-8 perspective-[1000px] max-h-[60vh] overflow-y-auto p-4 custom-scrollbar">
+                        <div className="flex-1 min-h-0 overflow-y-auto p-4 pb-6 custom-scrollbar">
+                            <div className="flex flex-wrap justify-center gap-8 perspective-[1000px]">
                             {images.map((img, idx) => {
-                                const isSelected = selectedPhotos.includes(img);
+                                const isSelected = selectedPhotos.some((photo) => photo.id === img.id);
                                 return (
                                     <motion.div
                                         key={idx}
@@ -604,7 +822,7 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
                                             ${isSelected ? 'border-4 border-brand-curious ring-4 ring-brand-picton/50 scale-105 z-10' : 'border-4 border-white hover:scale-105 shadow-md shadow-brand-curious/20 hover:shadow-xl'}
                                         `}
                                         >
-                                            <img src={img} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
+                                            <img src={img.url} alt={`Photo ${idx + 1}`} className="w-full h-full object-cover" />
 
                                             {/* Selection Overlay */}
                                             {isSelected && (
@@ -633,7 +851,7 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
                                                 <button
                                                     onClick={(e) => {
                                                         e.stopPropagation();
-                                                        setZoomedPhoto(img);
+                                                        setZoomedPhoto(img.url);
                                                     }}
                                                     className="px-4 py-1.5 rounded-full bg-white/20 backdrop-blur-md border border-white/40 text-white text-sm font-medium hover:bg-white/30 transition-colors"
                                                 >
@@ -644,6 +862,7 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
                                     </motion.div>
                                 )
                             })}
+                            </div>
                         </div>
                     </motion.div>
                 )}
@@ -652,51 +871,183 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
                     <motion.div
                         initial={{ opacity: 0, x: 20 }}
                         animate={{ opacity: 1, x: 0 }}
-                        className="w-full max-w-5xl"
+                        className="w-full max-w-7xl flex flex-1 min-h-0 flex-col"
                     >
-                        <h2 className="text-3xl font-bold text-center text-slate-800 mb-8">Pilih Frame Favoritmu</h2>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-6 px-4 max-h-[60vh] overflow-y-auto p-4">
-                            {templates.map((template) => (
-                                <div key={template.id} className="relative group">
-                                    <button
-                                        onClick={() => setSelectedTemplate(template)}
-                                        className={`relative w-full aspect-[2/3] rounded-xl overflow-hidden border-4 transition-all shadow-md hover:shadow-xl ${selectedTemplate?.id === template.id
-                                            ? 'border-brand-curious scale-105 ring-4 ring-brand-picton/50'
-                                            : 'border-white hover:border-brand-picton'
-                                            } `}
-                                    >
-                                        <img
-                                            src={template.preview_url || template.image_url}
-                                            alt={template.name}
-                                            className="w-full h-full object-cover"
-                                        />
-                                        {selectedTemplate?.id === template.id && (
-                                            <div className="absolute inset-0 bg-brand-curious/20 flex items-center justify-center backdrop-blur-[2px]">
-                                                <div className="bg-white rounded-full p-2 shadow-lg">
-                                                    <Check className="w-6 h-6 text-brand-curious" />
-                                                </div>
-                                            </div>
-                                        )}
-                                    </button>
-                                    <button
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            setZoomedPhoto(template.preview_url || template.image_url);
-                                        }}
-                                        className="absolute top-2 right-2 p-2 bg-black/50 hover:bg-black/70 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                                        title="Perbesar Frame"
-                                    >
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line><line x1="11" y1="8" x2="11" y2="14"></line><line x1="8" y1="11" x2="14" y2="11"></line></svg>
-                                    </button>
+                        <h2 className="text-3xl font-bold text-center text-slate-800 mb-2">Pilih Frame Favoritmu</h2>
+                        <p className="text-center text-slate-500 mb-6 text-lg">
+                            {isLoadingTemplates
+                                ? 'Memuat template frame...'
+                                : templateFetchError
+                                    ? templateFetchError
+                                    : 'Setiap card menampilkan preview slot dari foto yang baru diambil.'}
+                        </p>
+
+                        {isLoadingTemplates && (
+                            <div className="flex flex-1 items-center justify-center">
+                                <div className="flex flex-col items-center gap-4">
+                                    <div className="h-10 w-10 animate-spin rounded-full border-4 border-slate-200 border-t-brand-curious" />
+                                    <p className="text-slate-500">Memuat frame dari server...</p>
+                                    <p className="text-xs text-slate-400">{serverBaseUrl}</p>
                                 </div>
-                            ))}
+                            </div>
+                        )}
+
+                        {!isLoadingTemplates && templateFetchError && (
+                            <div className="flex flex-1 items-center justify-center">
+                                <div className="flex flex-col items-center gap-4 text-center max-w-md">
+                                    <div className="h-16 w-16 rounded-full bg-red-100 flex items-center justify-center">
+                                        <span className="text-3xl">⚠️</span>
+                                    </div>
+                                    <p className="text-red-600 font-medium">{templateFetchError}</p>
+                                    <p className="text-sm text-slate-400">Server: {serverBaseUrl}</p>
+                                </div>
+                            </div>
+                        )}
+
+                        {!isLoadingTemplates && !templateFetchError && templates.length === 0 && (
+                            <div className="flex flex-1 items-center justify-center">
+                                <div className="flex flex-col items-center gap-4 text-center">
+                                    <p className="text-slate-500 text-lg">Tidak ada template frame yang tersedia.</p>
+                                    <p className="text-sm text-slate-400">Hubungi admin untuk menambahkan template.</p>
+                                </div>
+                            </div>
+                        )}
+
+                        {!isLoadingTemplates && !templateFetchError && templates.length > 0 && (
+                        <div className="flex-1 min-h-0 overflow-y-auto p-4 custom-scrollbar">
+                            <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1.15fr)_400px]">
+                                <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-3">
+                                {templates.map((template) => {
+                                    const isSelected = selectedTemplate?.id === template.id;
+                                    const templateKey = getTemplateKey(template);
+                                    const previewImageUrl = templatePreviewUrls[templateKey] || template.preview_url || template.image_url;
+                                    const previewStatus = templatePreviewStatus[templateKey] ?? 'idle';
+
+                                    return (
+                                        <button
+                                            key={template.id}
+                                            onClick={() => setSelectedTemplate(template)}
+                                            className={`group flex w-full flex-col rounded-[28px] border bg-white p-3 text-left shadow-sm shadow-slate-200/60 transition-all hover:-translate-y-1 hover:shadow-lg ${isSelected
+                                                ? 'border-brand-curious ring-4 ring-brand-picton/25'
+                                                : 'border-slate-200/80'
+                                                }`}
+                                        >
+                                            <div className={`relative flex aspect-[2/3] items-center justify-center overflow-hidden rounded-2xl border bg-slate-100 p-3 ${isSelected
+                                                ? 'border-brand-curious/40'
+                                                : 'border-slate-200/80'
+                                                }`}>
+                                                <img
+                                                    src={previewImageUrl}
+                                                    alt={template.name}
+                                                    className="h-full w-full object-contain"
+                                                    onError={(e) => {
+                                                        const target = e.currentTarget;
+                                                        if (!target.dataset.retried && template.preview_url && target.src !== template.preview_url) {
+                                                            target.dataset.retried = '1';
+                                                            target.src = template.preview_url;
+                                                        } else if (!target.dataset.retried) {
+                                                            target.dataset.retried = '1';
+                                                            target.src = template.image_url;
+                                                        } else {
+                                                            target.style.display = 'none';
+                                                            target.parentElement?.insertAdjacentHTML('beforeend',
+                                                                '<div class="flex flex-col items-center justify-center gap-1 text-slate-400 text-xs p-2"><span class="text-2xl">🖼️</span><span>Gagal memuat gambar</span></div>'
+                                                            );
+                                                        }
+                                                    }}
+                                                />
+                                                {previewStatus === 'loading' && !templatePreviewUrls[templateKey] && (
+                                                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-white/82 backdrop-blur-[1px]">
+                                                        <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-brand-curious" />
+                                                        <p className="text-xs font-medium text-slate-500">Menyusun preview...</p>
+                                                    </div>
+                                                )}
+                                                {previewStatus === 'error' && (
+                                                    <div className="absolute inset-x-3 bottom-3 rounded-2xl bg-amber-50/95 px-3 py-2 text-center text-xs font-medium text-amber-700 shadow-sm">
+                                                        Preview otomatis gagal, frame asli ditampilkan.
+                                                    </div>
+                                                )}
+                                                {isSelected && (
+                                                    <div className="absolute right-4 top-4 flex items-center justify-center rounded-full bg-white p-2 shadow-lg">
+                                                        <div className="bg-white rounded-full p-2 shadow-lg">
+                                                            <Check className="w-6 h-6 text-brand-curious" />
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div className="px-1 pb-1 pt-4">
+                                                <p className="text-base font-semibold text-slate-800">{template.name || 'Frame Template'}</p>
+                                                <p className="mt-1 text-sm text-slate-500">Klik untuk memilih preview frame ini.</p>
+                                            </div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+
+                                <div className="lg:sticky lg:top-0">
+                                    <div className="overflow-hidden rounded-[32px] border border-slate-200/80 bg-white shadow-[0_24px_80px_-32px_rgba(15,23,42,0.35)]">
+                                        <div className="border-b border-slate-200/80 px-6 py-5">
+                                            <p className="text-xs font-semibold uppercase tracking-[0.35em] text-brand-picton">Preview Frame</p>
+                                            <h3 className="mt-2 text-2xl font-black text-slate-900">{selectedTemplate?.name || 'Pilih frame dulu'}</h3>
+                                            <p className="mt-2 text-sm text-slate-500">Panel ini menunjukkan hasil komposit foto yang akan diproses saat frame dipilih.</p>
+                                        </div>
+
+                                        <div className="p-5">
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    if (selectedTemplatePreviewUrl) {
+                                                        setZoomedPhoto(selectedTemplatePreviewUrl);
+                                                    }
+                                                }}
+                                                className="flex w-full items-center justify-center overflow-hidden rounded-[28px] border border-slate-200/80 bg-slate-100 p-4"
+                                            >
+                                                {selectedTemplatePreviewUrl ? (
+                                                    <div className="relative flex w-full items-center justify-center">
+                                                        <img
+                                                            src={selectedTemplatePreviewUrl}
+                                                            alt={selectedTemplate?.name || 'Preview frame terpilih'}
+                                                            className="aspect-[2/3] h-full w-full object-contain"
+                                                            onError={(e) => {
+                                                                const target = e.currentTarget;
+                                                                if (!target.dataset.retried && selectedTemplate?.preview_url) {
+                                                                    target.dataset.retried = '1';
+                                                                    target.src = selectedTemplate.preview_url;
+                                                                } else if (!target.dataset.retried && selectedTemplate?.image_url) {
+                                                                    target.dataset.retried = '1';
+                                                                    target.src = selectedTemplate.image_url;
+                                                                }
+                                                            }}
+                                                        />
+                                                        {selectedTemplate && templatePreviewStatus[getTemplateKey(selectedTemplate)] === 'loading' && !templatePreviewUrls[getTemplateKey(selectedTemplate)] && (
+                                                            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-white/82 backdrop-blur-[1px]">
+                                                                <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-brand-curious" />
+                                                                <p className="text-xs font-medium text-slate-500">Merakit preview frame...</p>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex h-full items-center justify-center px-8 text-center text-sm font-medium text-slate-500">
+                                                        Preview frame akan muncul di sini setelah frame dipilih.
+                                                    </div>
+                                                )}
+                                            </button>
+
+                                            <p className="mt-4 text-sm leading-6 text-slate-500">
+                                                Preview ini memakai foto yang tadi dipilih, jadi user bisa membandingkan hasil tiap frame sebelum diproses.
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
+                        )}
                     </motion.div>
                 )}
             </div>
 
             {/* Navigation Buttons */}
-            <div className="h-24 flex items-center justify-center gap-6 mt-4">
+            <div className="shrink-0 border-t border-slate-200/80 bg-white/90 backdrop-blur-md px-4 py-4">
                 {step === 'review' && (
                     <div className="flex justify-center w-full">
                         <Button
@@ -715,7 +1066,7 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
                 )}
 
                 {step === 'frame' && (
-                    <>
+                    <div className="flex w-full justify-center gap-6">
                         <Button size="lg" variant="secondary" onClick={() => setStep('review')} className="min-w-[160px] bg-white text-slate-700 hover:bg-slate-50">
                             Kembali
                         </Button>
@@ -737,7 +1088,7 @@ export const Preview = ({ images, onSave, session }: PreviewProps) => {
                                 </>
                             )}
                         </Button>
-                    </>
+                    </div>
                 )}
             </div>
 
