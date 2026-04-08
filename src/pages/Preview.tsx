@@ -491,6 +491,34 @@ export const Preview = ({ images, sessionMediaList, onSave, session }: PreviewPr
             // Await ALL uploads before completing session to ensure everything is saved
             setStatusMessage('Mengunggah foto...');
             try {
+                const uploadWithRetry = async (url: string, body: FormData, attempts: number = 1) => {
+                    let lastError: Error | null = null;
+
+                    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+                        try {
+                            const response = await fetch(url, {
+                                method: 'POST',
+                                body,
+                            });
+
+                            if (!response.ok) {
+                                const responseText = await response.text().catch(() => '');
+                                throw new Error(`Upload failed (${response.status}): ${responseText || response.statusText}`);
+                            }
+
+                            return response;
+                        } catch (error) {
+                            lastError = error instanceof Error ? error : new Error('Unknown upload error');
+
+                            if (attempt < attempts) {
+                                await new Promise((resolve) => window.setTimeout(resolve, 800 * attempt));
+                            }
+                        }
+                    }
+
+                    throw lastError ?? new Error('Upload failed after retries');
+                };
+
                 // Upload raw photos
                 const photoUploadPromises = images.map(async (image, i) => {
                     const file = new File([image.blob], `photo_${i + 1}.jpg`, {
@@ -500,10 +528,7 @@ export const Preview = ({ images, sessionMediaList, onSave, session }: PreviewPr
                     formData.append('session_code', sessionCode ?? '');
                     formData.append('photo', file);
                     formData.append('sequence', (i + 1).toString());
-                    return fetch(buildDesktopApiUrl(serverBaseUrl, '/api/v1/desktop/upload-photo'), {
-                        method: 'POST',
-                        body: formData,
-                    });
+                    return uploadWithRetry(buildDesktopApiUrl(serverBaseUrl, '/api/v1/desktop/upload-photo'), formData, 2);
                 });
 
                 // Upload Frame
@@ -513,10 +538,7 @@ export const Preview = ({ images, sessionMediaList, onSave, session }: PreviewPr
                 const frameFormData = new FormData();
                 frameFormData.append('session_code', sessionCode ?? '');
                 frameFormData.append('frame', frameFile);
-                const frameUploadPromise = fetch(buildDesktopApiUrl(serverBaseUrl, '/api/v1/desktop/upload-frame'), {
-                    method: 'POST',
-                    body: frameFormData,
-                });
+                const frameUploadPromise = uploadWithRetry(buildDesktopApiUrl(serverBaseUrl, '/api/v1/desktop/upload-frame'), frameFormData, 2);
 
                 // Generate GIF animation (photo slideshow as MP4) — always
                 setStatusMessage('Membuat GIF animasi...');
@@ -528,10 +550,7 @@ export const Preview = ({ images, sessionMediaList, onSave, session }: PreviewPr
                 gifFormData.append('session_code', sessionCode ?? '');
                 gifFormData.append('media_kind', 'gif');
                 gifFormData.append('gif', gifBlob, gifFilename);
-                const gifUploadPromise = fetch(buildDesktopApiUrl(serverBaseUrl, '/api/v1/desktop/upload-gif'), {
-                    method: 'POST',
-                    body: gifFormData,
-                });
+                const gifUploadPromise = uploadWithRetry(buildDesktopApiUrl(serverBaseUrl, '/api/v1/desktop/upload-gif'), gifFormData, 3);
 
                 // Upload boomerang media captured during the session
                 const mediaUploadPromises = (sessionMediaList ?? []).map((media) => {
@@ -541,10 +560,7 @@ export const Preview = ({ images, sessionMediaList, onSave, session }: PreviewPr
                     formData.append('session_code', sessionCode ?? '');
                     formData.append('media_kind', media.kind);
                     formData.append('gif', media.blob, filename);
-                    return fetch(buildDesktopApiUrl(serverBaseUrl, '/api/v1/desktop/upload-gif'), {
-                        method: 'POST',
-                        body: formData,
-                    });
+                    return uploadWithRetry(buildDesktopApiUrl(serverBaseUrl, '/api/v1/desktop/upload-gif'), formData, 5);
                 });
 
                 // Execute all uploads concurrently and AWAIT completion
